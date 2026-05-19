@@ -1,66 +1,81 @@
 const express = require('express');
 const cors = require('cors');
 require('dotenv').config();
-const admin = require('firebase-admin');
-
-const paymentRoutes = require('./routes/payment');
-app.use('/api/payment', paymentRoutes);
-
-let serviceAccount;
-try {
-  serviceAccount = require('./serviceAccountKey.json');
-  admin.initializeApp({
-    credential: admin.credential.cert(serviceAccount)
-  });
-} catch (e) {
-  console.log('Firebase not configured yet - skipping');
-}
 
 const app = express();
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({
+  extended: true,
+  limit: '10mb'
+}));
 
-const cropRoutes    = require('./routes/crop');
-const drCropRoutes  = require('./routes/drcrop');
-const weatherRoutes = require('./routes/weather');
-const mandiRoutes   = require('./routes/mandi');
-const carbonRoutes  = require('./routes/carbon');
-const authRoutes    = require('./routes/auth');
-
-app.use('/api/crop',    cropRoutes);
-app.use('/api/drcrop',  drCropRoutes);
-app.use('/api/weather', weatherRoutes);
-app.use('/api/mandi',   mandiRoutes);
-app.use('/api/carbon',  carbonRoutes);
-app.use('/api/auth',    authRoutes);
-
+// Health check first
 app.get('/', (req, res) => {
   res.json({
-    status: 'RaastKar API is running',
+    status: 'RaastKar Backend Running!',
     version: '1.0.0',
-    endpoints: [
-      'POST /api/crop/recommend',
-      'POST /api/drcrop/diagnose',
-      'GET  /api/weather/current',
-      'GET  /api/weather/forecast',
-      'GET  /api/mandi/prices',
-      'POST /api/carbon/calculate',
-      'GET  /api/carbon/my-credits',
-      'POST /api/auth/profile',
-      'GET  /api/auth/profile'
-    ]
+    timestamp: new Date().toISOString()
   });
 });
 
-app.use((err, req, res, next) => {
-  console.error(err.stack);
-  res.status(500).json({ success: false, error: 'Something went wrong' });
+app.get('/health', (req, res) => {
+  res.json({ status: 'ok' });
 });
+
+// Load routes safely
+try {
+  const cropRoutes = require('./routes/crop');
+  app.use('/api/crop', cropRoutes);
+} catch(e) {
+  console.log('crop route error:', e.message);
+}
+
+try {
+  const drCropRoutes = require('./routes/drcrop');
+  app.use('/api/drcrop', drCropRoutes);
+} catch(e) {
+  console.log('drcrop route error:', e.message);
+}
+
+try {
+  const weatherRoutes = require('./routes/weather');
+  app.use('/api/weather', weatherRoutes);
+} catch(e) {
+  console.log('weather route error:', e.message);
+}
+
+try {
+  const mandiRoutes = require('./routes/mandi');
+  app.use('/api/mandi', mandiRoutes);
+} catch(e) {
+  console.log('mandi route error:', e.message);
+}
+
+try {
+  const carbonRoutes = require('./routes/carbon');
+  app.use('/api/carbon', carbonRoutes);
+} catch(e) {
+  console.log('carbon route error:', e.message);
+}
+
+try {
+  const authRoutes = require('./routes/auth');
+  app.use('/api/auth', authRoutes);
+} catch(e) {
+  console.log('auth route error:', e.message);
+}
+
+try {
+  const paymentRoutes = require('./routes/payment');
+  app.use('/api/payment', paymentRoutes);
+} catch(e) {
+  console.log('payment route error:', e.message);
+}
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log('=====================================');
-  console.log('  RaastKar Backend Running!');
-  console.log(`  http://localhost:${PORT}`);
-  console.log('=====================================');
+  console.log(`RaastKar Backend running on port ${PORT}`);
 });
+
+module.exports = app;
