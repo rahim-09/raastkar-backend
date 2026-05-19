@@ -9,6 +9,8 @@ app.use(express.urlencoded({
   extended: true,
   limit: '10mb'
 }));
+const pricingRoutes = require('./routes/pricing');
+app.use('/api/pricing', pricingRoutes);
 
 // Health check first
 app.get('/', (req, res) => {
