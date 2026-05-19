@@ -3,6 +3,9 @@ const cors = require('cors');
 require('dotenv').config();
 const admin = require('firebase-admin');
 
+const paymentRoutes = require('./routes/payment');
+app.use('/api/payment', paymentRoutes);
+
 let serviceAccount;
 try {
   serviceAccount = require('./serviceAccountKey.json');
