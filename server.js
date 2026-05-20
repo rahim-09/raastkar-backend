@@ -12,6 +12,11 @@ app.use(express.urlencoded({
 const pricingRoutes = require('./routes/pricing');
 app.use('/api/pricing', pricingRoutes);
 
+const authRoutes = require('./routes/auth');
+const paymentsNewRoutes = require('./routes/payments_new');
+
+app.use('/api/auth', authRoutes);
+app.use('/api/payments', paymentsNewRoutes);
 // Health check first
 app.get('/', (req, res) => {
   res.json({
