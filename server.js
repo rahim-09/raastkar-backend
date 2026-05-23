@@ -3,21 +3,12 @@ const cors = require('cors');
 require('dotenv').config();
 
 const app = express();
+
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({
-  extended: true,
-  limit: '10mb'
-}));
-const pricingRoutes = require('./routes/pricing');
-app.use('/api/pricing', pricingRoutes);
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-const authRoutes = require('./routes/auth');
-const paymentsNewRoutes = require('./routes/payments_new');
-
-app.use('/api/auth', authRoutes);
-app.use('/api/payments', paymentsNewRoutes);
-// Health check first
+// Health check
 app.get('/', (req, res) => {
   res.json({
     status: 'RaastKar Backend Running!',
@@ -31,6 +22,20 @@ app.get('/health', (req, res) => {
 });
 
 // Load routes safely
+try {
+  const pricingRoutes = require('./routes/pricing');
+  app.use('/api/pricing', pricingRoutes);
+} catch(e) {
+  console.log('pricing route error:', e.message);
+}
+
+try {
+  const authRoutes = require('./routes/auth');
+  app.use('/api/auth', authRoutes);
+} catch(e) {
+  console.log('auth route error:', e.message);
+}
+
 try {
   const cropRoutes = require('./routes/crop');
   app.use('/api/crop', cropRoutes);
@@ -67,22 +72,19 @@ try {
 }
 
 try {
-  const authRoutes = require('./routes/auth');
-  app.use('/api/auth', authRoutes);
-} catch(e) {
-  console.log('auth route error:', e.message);
-}
-
-try {
   const paymentRoutes = require('./routes/payment');
   app.use('/api/payment', paymentRoutes);
 } catch(e) {
   console.log('payment route error:', e.message);
 }
 
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log(`RaastKar Backend running on port ${PORT}`);
-});
+// Only listen locally, NOT on Vercel
+if (process.env.NODE_ENV !== 'production') {
+  const PORT = process.env.PORT || 3000;
+  app.listen(PORT, () => {
+    console.log(`RaastKar Backend running on port ${PORT}`);
+  });
+}
 
+// Export for Vercel
 module.exports = app;
