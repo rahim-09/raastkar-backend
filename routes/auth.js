@@ -4,21 +4,29 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const { OAuth2Client } = require('google-auth-library');
 const { v4: uuidv4 } = require('uuid');
+const { MongoClient } = require('mongodb');
 
 const JWT_SECRET = process.env.JWT_SECRET || 'raastkar_jwt_secret_2024';
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || '';
+const MONGODB_URI = process.env.MONGODB_URI;
 
 const googleClient = new OAuth2Client(GOOGLE_CLIENT_ID);
 
-// In-memory storage (use MongoDB in production)
-let users = [];
-let sessions = [];
+// MongoDB connection
+let db = null;
+async function getDB() {
+  if (db) return db;
+  const client = new MongoClient(MONGODB_URI);
+  await client.connect();
+  db = client.db('raastkar');
+  console.log('✅ Connected to MongoDB');
+  return db;
+}
 
-// Register new user
+// Register
 router.post('/register', async (req, res) => {
   try {
     const { email, password, name, country } = req.body;
-
     if (!email || !password || !name) {
       return res.status(400).json({
         success: false,
@@ -26,8 +34,12 @@ router.post('/register', async (req, res) => {
       });
     }
 
-    // Check if user exists
-    const existing = users.find(u => u.email === email.toLowerCase());
+    const database = await getDB();
+    const users = database.collection('users');
+
+    const existing = await users.findOne({
+      email: email.toLowerCase()
+    });
     if (existing) {
       return res.status(400).json({
         success: false,
@@ -44,7 +56,7 @@ router.post('/register', async (req, res) => {
       password: hashedPassword,
       name,
       country: country || 'PK',
-      credits: 10, // Free 10 credits on signup
+      credits: 10,
       credits_used: 0,
       plan: 'Free Trial',
       joined_at: new Date().toISOString(),
@@ -53,7 +65,7 @@ router.post('/register', async (req, res) => {
       free_credits_given: true,
     };
 
-    users.push(newUser);
+    await users.insertOne(newUser);
 
     const token = jwt.sign(
       { userId, email: email.toLowerCase() },
@@ -72,10 +84,10 @@ router.post('/register', async (req, res) => {
         country: newUser.country,
         credits: newUser.credits,
         plan: newUser.plan,
-        free_credits_given: true,
       }
     });
   } catch (e) {
+    console.error('Register error:', e.message);
     res.status(500).json({ success: false, error: e.message });
   }
 });
@@ -84,7 +96,6 @@ router.post('/register', async (req, res) => {
 router.post('/login', async (req, res) => {
   try {
     const { email, password } = req.body;
-
     if (!email || !password) {
       return res.status(400).json({
         success: false,
@@ -92,7 +103,12 @@ router.post('/login', async (req, res) => {
       });
     }
 
-    const user = users.find(u => u.email === email.toLowerCase());
+    const database = await getDB();
+    const users = database.collection('users');
+
+    const user = await users.findOne({
+      email: email.toLowerCase()
+    });
     if (!user) {
       return res.status(401).json({
         success: false,
@@ -100,7 +116,9 @@ router.post('/login', async (req, res) => {
       });
     }
 
-    const validPassword = await bcrypt.compare(password, user.password);
+    const validPassword = await bcrypt.compare(
+      password, user.password
+    );
     if (!validPassword) {
       return res.status(401).json({
         success: false,
@@ -108,7 +126,10 @@ router.post('/login', async (req, res) => {
       });
     }
 
-    user.last_login = new Date().toISOString();
+    await users.updateOne(
+      { id: user.id },
+      { $set: { last_login: new Date().toISOString() } }
+    );
 
     const token = jwt.sign(
       { userId: user.id, email: user.email },
@@ -129,6 +150,7 @@ router.post('/login', async (req, res) => {
       }
     });
   } catch (e) {
+    console.error('Login error:', e.message);
     res.status(500).json({ success: false, error: e.message });
   }
 });
@@ -136,35 +158,40 @@ router.post('/login', async (req, res) => {
 // Google Login
 router.post('/google', async (req, res) => {
   try {
-    const { idToken, country } = req.body;
+    const { idToken, email, name, picture, country } = req.body;
 
-    let googleUser;
+    const database = await getDB();
+    const users = database.collection('users');
+
+    let googleEmail = email;
+    let googleName = name;
+
+    // Try to verify real Google token
     try {
       const ticket = await googleClient.verifyIdToken({
         idToken,
         audience: GOOGLE_CLIENT_ID,
       });
-      googleUser = ticket.getPayload();
+      const payload = ticket.getPayload();
+      googleEmail = payload.email;
+      googleName = payload.name;
     } catch (e) {
-      // For testing without real Google client ID
-      googleUser = {
-        sub: 'google_' + Date.now(),
-        email: req.body.email || 'test@gmail.com',
-        name: req.body.name || 'Google User',
-        picture: req.body.picture || '',
-      };
+      console.log('Using provided email/name for Google login');
     }
 
-    let user = users.find(u => u.email === googleUser.email.toLowerCase());
+    let user = await users.findOne({
+      email: googleEmail.toLowerCase()
+    });
+
+    const isNewUser = !user;
 
     if (!user) {
-      // New user - give 10 free credits
       const userId = uuidv4();
       user = {
         id: userId,
-        email: googleUser.email.toLowerCase(),
+        email: googleEmail.toLowerCase(),
         password: '',
-        name: googleUser.name,
+        name: googleName || 'Google User',
         country: country || 'PK',
         credits: 10,
         credits_used: 0,
@@ -172,13 +199,15 @@ router.post('/google', async (req, res) => {
         joined_at: new Date().toISOString(),
         last_login: new Date().toISOString(),
         is_google: true,
-        google_id: googleUser.sub,
-        picture: googleUser.picture || '',
+        picture: picture || '',
         free_credits_given: true,
       };
-      users.push(user);
+      await users.insertOne(user);
     } else {
-      user.last_login = new Date().toISOString();
+      await users.updateOne(
+        { id: user.id },
+        { $set: { last_login: new Date().toISOString() } }
+      );
     }
 
     const token = jwt.sign(
@@ -190,7 +219,7 @@ router.post('/google', async (req, res) => {
     res.json({
       success: true,
       token,
-      isNewUser: user.free_credits_given && user.credits === 10,
+      isNewUser,
       user: {
         id: user.id,
         email: user.email,
@@ -202,104 +231,172 @@ router.post('/google', async (req, res) => {
       }
     });
   } catch (e) {
+    console.error('Google login error:', e.message);
     res.status(500).json({ success: false, error: e.message });
   }
 });
 
-// Get user profile
-router.get('/profile', authenticateToken, (req, res) => {
-  const user = users.find(u => u.id === req.userId);
-  if (!user) {
-    return res.status(404).json({ success: false, error: 'User not found' });
-  }
-  res.json({
-    success: true,
-    user: {
-      id: user.id,
-      email: user.email,
-      name: user.name,
-      country: user.country,
-      credits: user.credits - user.credits_used,
-      credits_total: user.credits,
-      credits_used: user.credits_used,
-      plan: user.plan,
-      joined_at: user.joined_at,
-      picture: user.picture || '',
+// Get profile
+router.get('/profile', authenticateToken, async (req, res) => {
+  try {
+    const database = await getDB();
+    const users = database.collection('users');
+    const user = await users.findOne({ id: req.userId });
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        error: 'User not found'
+      });
     }
-  });
+
+    res.json({
+      success: true,
+      user: {
+        id: user.id,
+        email: user.email,
+        name: user.name,
+        country: user.country,
+        phone: user.phone || '',
+        farmLocation: user.farmLocation || '',
+        credits: user.credits - user.credits_used,
+        credits_total: user.credits,
+        credits_used: user.credits_used,
+        plan: user.plan,
+        joined_at: user.joined_at,
+        picture: user.picture || '',
+      }
+    });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
 });
 
 // Update profile
-router.put('/profile', authenticateToken, (req, res) => {
-  const user = users.find(u => u.id === req.userId);
-  if (!user) {
-    return res.status(404).json({ success: false, error: 'User not found' });
+router.put('/profile', authenticateToken, async (req, res) => {
+  try {
+    const database = await getDB();
+    const users = database.collection('users');
+    const { name, country, phone, farmLocation } = req.body;
+
+    await users.updateOne(
+      { id: req.userId },
+      { $set: { name, country, phone, farmLocation } }
+    );
+
+    const user = await users.findOne({ id: req.userId });
+    res.json({ success: true, user });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
   }
-  const { name, country } = req.body;
-  if (name) user.name = name;
-  if (country) user.country = country;
-  res.json({ success: true, user });
 });
 
-// Add credits to user (called after payment approval)
-router.post('/add-credits', authenticateToken, (req, res) => {
-  const { credits } = req.body;
-  const user = users.find(u => u.id === req.userId);
-  if (!user) {
-    return res.status(404).json({ success: false, error: 'User not found' });
-  }
-  user.credits += parseInt(credits);
-  res.json({
-    success: true,
-    credits: user.credits - user.credits_used,
-    message: `${credits} credits added!`
-  });
-});
+// Change password
+router.post('/change-password', authenticateToken, async (req, res) => {
+  try {
+    const database = await getDB();
+    const users = database.collection('users');
+    const { currentPassword, newPassword } = req.body;
 
-// Use credits
-router.post('/use-credit', authenticateToken, (req, res) => {
-  const { amount, feature } = req.body;
-  const user = users.find(u => u.id === req.userId);
-  if (!user) {
-    return res.status(404).json({ success: false, error: 'User not found' });
+    const user = await users.findOne({ id: req.userId });
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        error: 'User not found'
+      });
+    }
+
+    if (user.is_google) {
+      return res.status(400).json({
+        success: false,
+        error: 'Google accounts cannot change password'
+      });
+    }
+
+    const valid = await bcrypt.compare(
+      currentPassword, user.password
+    );
+    if (!valid) {
+      return res.status(401).json({
+        success: false,
+        error: 'Current password is wrong'
+      });
+    }
+
+    const hashed = await bcrypt.hash(newPassword, 10);
+    await users.updateOne(
+      { id: req.userId },
+      { $set: { password: hashed } }
+    );
+
+    res.json({ success: true, message: 'Password changed!' });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
   }
-  const remaining = user.credits - user.credits_used;
-  if (remaining < (amount || 1)) {
-    return res.status(400).json({
-      success: false,
-      error: 'Not enough credits',
-      remaining
-    });
-  }
-  user.credits_used += (amount || 1);
-  res.json({
-    success: true,
-    remaining: user.credits - user.credits_used
-  });
 });
 
 // Admin - get all users
-router.get('/admin/users', (req, res) => {
+router.get('/admin/users', async (req, res) => {
   if (req.query.key !== 'raastkar_admin_2024') {
     return res.status(401).json({ error: 'Unauthorized' });
   }
-  res.json({
-    success: true,
-    total: users.length,
-    users: users.map(u => ({
-      id: u.id,
-      email: u.email,
-      name: u.name,
-      country: u.country,
-      credits: u.credits - u.credits_used,
-      plan: u.plan,
-      joined_at: u.joined_at,
-      last_login: u.last_login,
-    }))
-  });
+  try {
+    const database = await getDB();
+    const users = database.collection('users');
+    const allUsers = await users.find({}).toArray();
+
+    res.json({
+      success: true,
+      total: allUsers.length,
+      users: allUsers.map(u => ({
+        id: u.id,
+        email: u.email,
+        name: u.name,
+        country: u.country,
+        credits: u.credits - u.credits_used,
+        plan: u.plan,
+        joined_at: u.joined_at,
+        last_login: u.last_login,
+        is_google: u.is_google,
+      }))
+    });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
 });
 
-// Middleware to authenticate token
+// Admin - add credits to user
+router.post('/admin/add-credits', async (req, res) => {
+  const { key, email, credits } = req.body;
+  if (key !== 'raastkar_admin_2024') {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+  try {
+    const database = await getDB();
+    const users = database.collection('users');
+    const user = await users.findOne({
+      email: email.toLowerCase()
+    });
+
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    await users.updateOne(
+      { email: email.toLowerCase() },
+      { $inc: { credits: parseInt(credits) } }
+    );
+
+    res.json({
+      success: true,
+      message: `${credits} credits added to ${email}`
+    });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+// Middleware
 function authenticateToken(req, res, next) {
   const authHeader = req.headers['authorization'];
   const token = authHeader && authHeader.split(' ')[1];
@@ -317,4 +414,3 @@ function authenticateToken(req, res, next) {
 
 module.exports = router;
 module.exports.authenticateToken = authenticateToken;
-module.exports.users = users;
