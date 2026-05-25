@@ -83,6 +83,13 @@ try {
   app.use('/api/farm', farmRoutes);
 } catch(e) {
   console.log('farm route error:', e.message);
+} 
+
+try {
+  const couponRoutes = require('./routes/coupon');
+  app.use('/api/coupon', couponRoutes);
+} catch(e) {
+  console.log('coupon route error:', e.message);
 }
 
 // Only listen locally, NOT on Vercel
