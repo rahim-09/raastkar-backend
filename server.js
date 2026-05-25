@@ -78,6 +78,13 @@ try {
   console.log('payment route error:', e.message);
 }
 
+try {
+  const farmRoutes = require('./routes/farm');
+  app.use('/api/farm', farmRoutes);
+} catch(e) {
+  console.log('farm route error:', e.message);
+}
+
 // Only listen locally, NOT on Vercel
 if (process.env.NODE_ENV !== 'production') {
   const PORT = process.env.PORT || 3000;
