@@ -8,33 +8,29 @@ const uuidv4 = () => crypto.randomUUID();
 const { MongoClient } = require('mongodb');
 
 const JWT_SECRET = process.env.JWT_SECRET || 'raastkar_jwt_secret_2024';
-const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || '';
 const GOOGLE_WEB_CLIENT_ID = '19973026281-oirm7cc6nki1e5pqasj3hfnu8rb2n86b.apps.googleusercontent.com';
 const GOOGLE_ANDROID_CLIENT_ID = '19973026281-bc4tt7m8qpi2olhogv6vuohmseja5qg1.apps.googleusercontent.com';
 const MONGODB_URI = process.env.MONGODB_URI;
 
 const googleClient = new OAuth2Client();
 
-// MongoDB connection
 let db = null;
 async function getDB() {
   if (db) return db;
   const client = new MongoClient(MONGODB_URI);
   await client.connect();
   db = client.db('raastkar');
-  console.log('✅ Connected to MongoDB');
   return db;
 }
 
-// Helper to build user response with BOTH credits and credits_used
 function buildUserResponse(user) {
   return {
     id: user.id,
     email: user.email,
     name: user.name,
     country: user.country,
-    credits: user.credits || 10,           // total credits
-    credits_used: user.credits_used || 0,   // used credits
+    credits: user.credits || 10,
+    credits_used: user.credits_used || 0,
     plan: user.plan || 'Free Trial',
     picture: user.picture || '',
     is_google: user.is_google || false,
@@ -46,26 +42,16 @@ router.post('/register', async (req, res) => {
   try {
     const { email, password, name, country } = req.body;
     if (!email || !password || !name) {
-      return res.status(400).json({
-        success: false,
-        error: 'Email, password and name are required'
-      });
+      return res.status(400).json({ success: false, error: 'Email, password and name are required' });
     }
-
     const database = await getDB();
     const users = database.collection('users');
-
     const existing = await users.findOne({ email: email.toLowerCase() });
     if (existing) {
-      return res.status(400).json({
-        success: false,
-        error: 'Email already registered'
-      });
+      return res.status(400).json({ success: false, error: 'Email already registered' });
     }
-
     const hashedPassword = await bcrypt.hash(password, 10);
     const userId = uuidv4();
-
     const newUser = {
       id: userId,
       email: email.toLowerCase(),
@@ -80,21 +66,9 @@ router.post('/register', async (req, res) => {
       is_google: false,
       free_credits_given: true,
     };
-
     await users.insertOne(newUser);
-
-    const token = jwt.sign(
-      { userId, email: email.toLowerCase() },
-      JWT_SECRET,
-      { expiresIn: '30d' }
-    );
-
-    res.json({
-      success: true,
-      message: 'Account created! 10 free credits added.',
-      token,
-      user: buildUserResponse(newUser),
-    });
+    const token = jwt.sign({ userId, email: email.toLowerCase() }, JWT_SECRET, { expiresIn: '30d' });
+    res.json({ success: true, message: 'Account created! 10 free credits added.', token, user: buildUserResponse(newUser) });
   } catch (e) {
     console.error('Register error:', e.message);
     res.status(500).json({ success: false, error: e.message });
@@ -106,47 +80,21 @@ router.post('/login', async (req, res) => {
   try {
     const { email, password } = req.body;
     if (!email || !password) {
-      return res.status(400).json({
-        success: false,
-        error: 'Email and password required'
-      });
+      return res.status(400).json({ success: false, error: 'Email and password required' });
     }
-
     const database = await getDB();
     const users = database.collection('users');
-
     const user = await users.findOne({ email: email.toLowerCase() });
     if (!user) {
-      return res.status(401).json({
-        success: false,
-        error: 'Email not found'
-      });
+      return res.status(401).json({ success: false, error: 'Email not found' });
     }
-
     const validPassword = await bcrypt.compare(password, user.password);
     if (!validPassword) {
-      return res.status(401).json({
-        success: false,
-        error: 'Wrong password'
-      });
+      return res.status(401).json({ success: false, error: 'Wrong password' });
     }
-
-    await users.updateOne(
-      { id: user.id },
-      { $set: { last_login: new Date().toISOString() } }
-    );
-
-    const token = jwt.sign(
-      { userId: user.id, email: user.email },
-      JWT_SECRET,
-      { expiresIn: '30d' }
-    );
-
-    res.json({
-      success: true,
-      token,
-      user: buildUserResponse(user),
-    });
+    await users.updateOne({ id: user.id }, { $set: { last_login: new Date().toISOString() } });
+    const token = jwt.sign({ userId: user.id, email: user.email }, JWT_SECRET, { expiresIn: '30d' });
+    res.json({ success: true, token, user: buildUserResponse(user) });
   } catch (e) {
     console.error('Login error:', e.message);
     res.status(500).json({ success: false, error: e.message });
@@ -157,56 +105,36 @@ router.post('/login', async (req, res) => {
 router.post('/google', async (req, res) => {
   try {
     const { idToken, accessToken, email, name, picture, country, isWeb } = req.body;
-
-    console.log('Google login:', { email, isWeb, hasIdToken: !!idToken });
-
     const database = await getDB();
     const users = database.collection('users');
-
     let googleEmail = email;
     let googleName = name;
     let googlePicture = picture;
 
-    // Try to verify token
     if (idToken) {
       try {
-        const ticket = await googleClient.verifyIdToken({
-          idToken,
-          audience: GOOGLE_WEB_CLIENT_ID,
-        });
+        const ticket = await googleClient.verifyIdToken({ idToken, audience: GOOGLE_WEB_CLIENT_ID });
         const payload = ticket.getPayload();
         googleEmail = payload.email;
         googleName = payload.name;
         googlePicture = payload.picture;
-        console.log('✅ Verified with web client ID');
       } catch (e1) {
         try {
-          const ticket = await googleClient.verifyIdToken({
-            idToken,
-            audience: GOOGLE_ANDROID_CLIENT_ID,
-          });
+          const ticket = await googleClient.verifyIdToken({ idToken, audience: GOOGLE_ANDROID_CLIENT_ID });
           const payload = ticket.getPayload();
           googleEmail = payload.email;
           googleName = payload.name;
           googlePicture = payload.picture;
-          console.log('✅ Verified with android client ID');
         } catch (e2) {
-          console.log('⚠️ Token verification failed, using provided email');
           if (!email) {
-            return res.status(400).json({
-              success: false,
-              error: 'Google authentication failed'
-            });
+            return res.status(400).json({ success: false, error: 'Google authentication failed' });
           }
         }
       }
     }
 
     if (!googleEmail) {
-      return res.status(400).json({
-        success: false,
-        error: 'Could not get email from Google'
-      });
+      return res.status(400).json({ success: false, error: 'Could not get email from Google' });
     }
 
     let user = await users.findOne({ email: googleEmail.toLowerCase() });
@@ -230,34 +158,52 @@ router.post('/google', async (req, res) => {
         free_credits_given: true,
       };
       await users.insertOne(user);
-      console.log('✅ New Google user:', googleEmail);
     } else {
-      await users.updateOne(
-        { id: user.id },
-        {
-          $set: {
-            last_login: new Date().toISOString(),
-            picture: googlePicture || user.picture || '',
-          }
-        }
-      );
-      console.log('✅ Existing Google user:', googleEmail);
+      await users.updateOne({ id: user.id }, { $set: { last_login: new Date().toISOString(), picture: googlePicture || user.picture || '' } });
+      user = await users.findOne({ email: googleEmail.toLowerCase() });
     }
 
-    const token = jwt.sign(
-      { userId: user.id, email: user.email },
-      JWT_SECRET,
-      { expiresIn: '30d' }
+    const token = jwt.sign({ userId: user.id, email: user.email }, JWT_SECRET, { expiresIn: '30d' });
+    res.json({ success: true, token, isNewUser, user: buildUserResponse(user) });
+  } catch (e) {
+    console.error('Google login error:', e.message);
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+// ── USE CREDIT — deduct from backend ──
+router.post('/use-credit', authenticateToken, async (req, res) => {
+  try {
+    const { amount = 1 } = req.body;
+    const database = await getDB();
+    const users = database.collection('users');
+    const user = await users.findOne({ id: req.userId });
+
+    if (!user) {
+      return res.status(404).json({ success: false, error: 'User not found' });
+    }
+
+    const remaining = (user.credits || 0) - (user.credits_used || 0);
+    if (remaining < amount) {
+      return res.status(400).json({ success: false, error: 'Not enough credits' });
+    }
+
+    await users.updateOne(
+      { id: req.userId },
+      { $inc: { credits_used: amount } }
     );
+
+    const updated = await users.findOne({ id: req.userId });
+    console.log(`✅ Credits used: ${amount} by ${user.email} — remaining: ${updated.credits - updated.credits_used}`);
 
     res.json({
       success: true,
-      token,
-      isNewUser,
-      user: buildUserResponse(user),
+      credits: updated.credits,
+      credits_used: updated.credits_used,
+      remaining: updated.credits - updated.credits_used,
     });
   } catch (e) {
-    console.error('Google login error:', e.message);
+    console.error('use-credit error:', e.message);
     res.status(500).json({ success: false, error: e.message });
   }
 });
@@ -268,11 +214,9 @@ router.get('/profile', authenticateToken, async (req, res) => {
     const database = await getDB();
     const users = database.collection('users');
     const user = await users.findOne({ id: req.userId });
-
     if (!user) {
       return res.status(404).json({ success: false, error: 'User not found' });
     }
-
     res.json({
       success: true,
       user: {
@@ -294,12 +238,7 @@ router.put('/profile', authenticateToken, async (req, res) => {
     const database = await getDB();
     const users = database.collection('users');
     const { name, country, phone, farmLocation } = req.body;
-
-    await users.updateOne(
-      { id: req.userId },
-      { $set: { name, country, phone, farmLocation } }
-    );
-
+    await users.updateOne({ id: req.userId }, { $set: { name, country, phone, farmLocation } });
     const user = await users.findOne({ id: req.userId });
     res.json({ success: true, user: buildUserResponse(user) });
   } catch (e) {
@@ -313,33 +252,13 @@ router.post('/change-password', authenticateToken, async (req, res) => {
     const database = await getDB();
     const users = database.collection('users');
     const { currentPassword, newPassword } = req.body;
-
     const user = await users.findOne({ id: req.userId });
-    if (!user) {
-      return res.status(404).json({ success: false, error: 'User not found' });
-    }
-
-    if (user.is_google) {
-      return res.status(400).json({
-        success: false,
-        error: 'Google accounts cannot change password'
-      });
-    }
-
+    if (!user) return res.status(404).json({ success: false, error: 'User not found' });
+    if (user.is_google) return res.status(400).json({ success: false, error: 'Google accounts cannot change password' });
     const valid = await bcrypt.compare(currentPassword, user.password);
-    if (!valid) {
-      return res.status(401).json({
-        success: false,
-        error: 'Current password is wrong'
-      });
-    }
-
+    if (!valid) return res.status(401).json({ success: false, error: 'Current password is wrong' });
     const hashed = await bcrypt.hash(newPassword, 10);
-    await users.updateOne(
-      { id: req.userId },
-      { $set: { password: hashed } }
-    );
-
+    await users.updateOne({ id: req.userId }, { $set: { password: hashed } });
     res.json({ success: true, message: 'Password changed!' });
   } catch (e) {
     res.status(500).json({ success: false, error: e.message });
@@ -355,7 +274,6 @@ router.get('/admin/users', async (req, res) => {
     const database = await getDB();
     const users = database.collection('users');
     const allUsers = await users.find({}).toArray();
-
     res.json({
       success: true,
       total: allUsers.length,
@@ -364,7 +282,7 @@ router.get('/admin/users', async (req, res) => {
         email: u.email,
         name: u.name,
         country: u.country,
-        credits: u.credits,
+        credits: u.credits || 0,
         credits_used: u.credits_used || 0,
         credits_remaining: (u.credits || 0) - (u.credits_used || 0),
         plan: u.plan,
@@ -387,21 +305,10 @@ router.post('/admin/add-credits', async (req, res) => {
   try {
     const database = await getDB();
     const users = database.collection('users');
-
     const user = await users.findOne({ email: email.toLowerCase() });
-    if (!user) {
-      return res.status(404).json({ error: 'User not found' });
-    }
-
-    await users.updateOne(
-      { email: email.toLowerCase() },
-      { $inc: { credits: parseInt(credits) } }
-    );
-
-    res.json({
-      success: true,
-      message: `${credits} credits added to ${email}`
-    });
+    if (!user) return res.status(404).json({ error: 'User not found' });
+    await users.updateOne({ email: email.toLowerCase() }, { $inc: { credits: parseInt(credits) } });
+    res.json({ success: true, message: `${credits} credits added to ${email}` });
   } catch (e) {
     res.status(500).json({ success: false, error: e.message });
   }
@@ -411,9 +318,7 @@ router.post('/admin/add-credits', async (req, res) => {
 function authenticateToken(req, res, next) {
   const authHeader = req.headers['authorization'];
   const token = authHeader && authHeader.split(' ')[1];
-  if (!token) {
-    return res.status(401).json({ error: 'Token required' });
-  }
+  if (!token) return res.status(401).json({ error: 'Token required' });
   try {
     const decoded = jwt.verify(token, JWT_SECRET);
     req.userId = decoded.userId;
