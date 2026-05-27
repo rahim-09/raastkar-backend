@@ -26,6 +26,21 @@ async function getDB() {
   return db;
 }
 
+// Helper to build user response with BOTH credits and credits_used
+function buildUserResponse(user) {
+  return {
+    id: user.id,
+    email: user.email,
+    name: user.name,
+    country: user.country,
+    credits: user.credits || 10,           // total credits
+    credits_used: user.credits_used || 0,   // used credits
+    plan: user.plan || 'Free Trial',
+    picture: user.picture || '',
+    is_google: user.is_google || false,
+  };
+}
+
 // ── Register ──
 router.post('/register', async (req, res) => {
   try {
@@ -78,14 +93,7 @@ router.post('/register', async (req, res) => {
       success: true,
       message: 'Account created! 10 free credits added.',
       token,
-      user: {
-        id: userId,
-        email: newUser.email,
-        name: newUser.name,
-        country: newUser.country,
-        credits: newUser.credits,
-        plan: newUser.plan,
-      }
+      user: buildUserResponse(newUser),
     });
   } catch (e) {
     console.error('Register error:', e.message);
@@ -137,14 +145,7 @@ router.post('/login', async (req, res) => {
     res.json({
       success: true,
       token,
-      user: {
-        id: user.id,
-        email: user.email,
-        name: user.name,
-        country: user.country,
-        credits: user.credits - user.credits_used,
-        plan: user.plan,
-      }
+      user: buildUserResponse(user),
     });
   } catch (e) {
     console.error('Login error:', e.message);
@@ -152,12 +153,12 @@ router.post('/login', async (req, res) => {
   }
 });
 
-// ── Google Login ── works for both web and mobile ──
+// ── Google Login ──
 router.post('/google', async (req, res) => {
   try {
     const { idToken, accessToken, email, name, picture, country, isWeb } = req.body;
 
-    console.log('Google login attempt:', { email, isWeb, hasIdToken: !!idToken, hasAccessToken: !!accessToken });
+    console.log('Google login:', { email, isWeb, hasIdToken: !!idToken });
 
     const database = await getDB();
     const users = database.collection('users');
@@ -166,82 +167,39 @@ router.post('/google', async (req, res) => {
     let googleName = name;
     let googlePicture = picture;
 
-    // Try to verify token — support both web and mobile client IDs
+    // Try to verify token
     if (idToken) {
       try {
-        // Try web client ID first
+        const ticket = await googleClient.verifyIdToken({
+          idToken,
+          audience: GOOGLE_WEB_CLIENT_ID,
+        });
+        const payload = ticket.getPayload();
+        googleEmail = payload.email;
+        googleName = payload.name;
+        googlePicture = payload.picture;
+        console.log('✅ Verified with web client ID');
+      } catch (e1) {
         try {
           const ticket = await googleClient.verifyIdToken({
             idToken,
-            audience: GOOGLE_WEB_CLIENT_ID,
+            audience: GOOGLE_ANDROID_CLIENT_ID,
           });
           const payload = ticket.getPayload();
           googleEmail = payload.email;
           googleName = payload.name;
           googlePicture = payload.picture;
-          console.log('✅ Verified with web client ID');
-        } catch (webErr) {
-          // Try android client ID
-          try {
-            const ticket = await googleClient.verifyIdToken({
-              idToken,
-              audience: GOOGLE_ANDROID_CLIENT_ID,
+          console.log('✅ Verified with android client ID');
+        } catch (e2) {
+          console.log('⚠️ Token verification failed, using provided email');
+          if (!email) {
+            return res.status(400).json({
+              success: false,
+              error: 'Google authentication failed'
             });
-            const payload = ticket.getPayload();
-            googleEmail = payload.email;
-            googleName = payload.name;
-            googlePicture = payload.picture;
-            console.log('✅ Verified with android client ID');
-          } catch (androidErr) {
-            // Try with env client ID
-            try {
-              const ticket = await googleClient.verifyIdToken({
-                idToken,
-                audience: GOOGLE_CLIENT_ID,
-              });
-              const payload = ticket.getPayload();
-              googleEmail = payload.email;
-              googleName = payload.name;
-              googlePicture = payload.picture;
-              console.log('✅ Verified with env client ID');
-            } catch (envErr) {
-              // Token verification failed — use provided email
-              console.log('⚠️ Token verification failed, using provided email:', email);
-              if (!email) {
-                return res.status(400).json({
-                  success: false,
-                  error: 'Google authentication failed — no valid token or email'
-                });
-              }
-            }
           }
         }
-      } catch (e) {
-        console.log('Token verification error:', e.message);
-        if (!email) {
-          return res.status(400).json({
-            success: false,
-            error: 'Google authentication failed'
-          });
-        }
       }
-    } else if (accessToken && email) {
-      // Web sometimes only sends accessToken — use provided email
-      console.log('Using accessToken flow with email:', email);
-      googleEmail = email;
-      googleName = name;
-      googlePicture = picture;
-    } else if (email) {
-      // Fallback — just use email
-      console.log('Using email only flow:', email);
-      googleEmail = email;
-      googleName = name;
-      googlePicture = picture;
-    } else {
-      return res.status(400).json({
-        success: false,
-        error: 'No valid credentials provided'
-      });
     }
 
     if (!googleEmail) {
@@ -251,7 +209,6 @@ router.post('/google', async (req, res) => {
       });
     }
 
-    // Find or create user
     let user = await users.findOne({ email: googleEmail.toLowerCase() });
     const isNewUser = !user;
 
@@ -273,7 +230,7 @@ router.post('/google', async (req, res) => {
         free_credits_given: true,
       };
       await users.insertOne(user);
-      console.log('✅ New Google user created:', googleEmail);
+      console.log('✅ New Google user:', googleEmail);
     } else {
       await users.updateOne(
         { id: user.id },
@@ -281,11 +238,10 @@ router.post('/google', async (req, res) => {
           $set: {
             last_login: new Date().toISOString(),
             picture: googlePicture || user.picture || '',
-            name: googleName || user.name,
           }
         }
       );
-      console.log('✅ Existing Google user logged in:', googleEmail);
+      console.log('✅ Existing Google user:', googleEmail);
     }
 
     const token = jwt.sign(
@@ -298,16 +254,7 @@ router.post('/google', async (req, res) => {
       success: true,
       token,
       isNewUser,
-      user: {
-        id: user.id,
-        email: user.email,
-        name: user.name,
-        country: user.country,
-        credits: user.credits - user.credits_used,
-        plan: user.plan,
-        picture: user.picture || '',
-        is_google: true,
-      }
+      user: buildUserResponse(user),
     });
   } catch (e) {
     console.error('Google login error:', e.message);
@@ -329,19 +276,11 @@ router.get('/profile', authenticateToken, async (req, res) => {
     res.json({
       success: true,
       user: {
-        id: user.id,
-        email: user.email,
-        name: user.name,
-        country: user.country,
+        ...buildUserResponse(user),
         phone: user.phone || '',
         farmLocation: user.farmLocation || '',
-        credits: user.credits - user.credits_used,
-        credits_total: user.credits,
-        credits_used: user.credits_used,
-        plan: user.plan,
+        credits_total: user.credits || 10,
         joined_at: user.joined_at,
-        picture: user.picture || '',
-        is_google: user.is_google || false,
       }
     });
   } catch (e) {
@@ -362,7 +301,7 @@ router.put('/profile', authenticateToken, async (req, res) => {
     );
 
     const user = await users.findOne({ id: req.userId });
-    res.json({ success: true, user });
+    res.json({ success: true, user: buildUserResponse(user) });
   } catch (e) {
     res.status(500).json({ success: false, error: e.message });
   }
@@ -425,7 +364,9 @@ router.get('/admin/users', async (req, res) => {
         email: u.email,
         name: u.name,
         country: u.country,
-        credits: u.credits - u.credits_used,
+        credits: u.credits,
+        credits_used: u.credits_used || 0,
+        credits_remaining: (u.credits || 0) - (u.credits_used || 0),
         plan: u.plan,
         joined_at: u.joined_at,
         last_login: u.last_login,
@@ -446,8 +387,8 @@ router.post('/admin/add-credits', async (req, res) => {
   try {
     const database = await getDB();
     const users = database.collection('users');
-    const user = await users.findOne({ email: email.toLowerCase() });
 
+    const user = await users.findOne({ email: email.toLowerCase() });
     if (!user) {
       return res.status(404).json({ error: 'User not found' });
     }
