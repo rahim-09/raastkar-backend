@@ -100,5 +100,8 @@ if (process.env.NODE_ENV !== 'production') {
   });
 }
 
+const pricingRoutes = require('./routes/pricing');
+app.use('/api/pricing', pricingRoutes);
+
 // Export for Vercel
 module.exports = app;
