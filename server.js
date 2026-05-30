@@ -28,7 +28,9 @@ try {
 }
 try {
   const authRoutes = require('./routes/auth');
+const remoteConfigRoutes = require('./routes/remote_config');
   app.use('/api/auth', authRoutes);
+app.use('/api/remote-config', remoteConfigRoutes);
 } catch(e) {
   console.log('auth route error:', e.message);
 }
