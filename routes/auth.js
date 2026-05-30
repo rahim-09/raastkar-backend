@@ -40,7 +40,7 @@ function buildUserResponse(user) {
 // ── Register ──
 router.post('/register', async (req, res) => {
   try {
-    const { email, password, name, country } = req.body;
+    const { email, password, name, country, idType, idNumber, idImage } = req.body;
     if (!email || !password || !name) {
       return res.status(400).json({ success: false, error: 'Email, password and name are required' });
     }
@@ -65,6 +65,11 @@ router.post('/register', async (req, res) => {
       last_login: new Date().toISOString(),
       is_google: false,
       free_credits_given: true,
+      // Government ID
+      id_type: idType || '',
+      id_number: idNumber || '',
+      id_image: idImage || '',
+      id_verified: false,
     };
     await users.insertOne(newUser);
     const token = jwt.sign({ userId, email: email.toLowerCase() }, JWT_SECRET, { expiresIn: '30d' });
@@ -289,6 +294,10 @@ router.get('/admin/users', async (req, res) => {
         joined_at: u.joined_at,
         last_login: u.last_login,
         is_google: u.is_google || false,
+        id_type: u.id_type || '',
+        id_number: u.id_number || '',
+        id_image: u.id_image || '',
+        id_verified: u.id_verified || false,
       }))
     });
   } catch (e) {
@@ -327,6 +336,59 @@ function authenticateToken(req, res, next) {
     return res.status(403).json({ error: 'Invalid token' });
   }
 }
+
+// ── Admin - Verify User ID ──
+router.post('/admin/verify-id', async (req, res) => {
+  const { key, userId, verified } = req.body;
+  if (key !== ADMIN_KEY) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+  try {
+    const database = await getDB();
+    const users = database.collection('users');
+    await users.updateOne({ id: userId }, { $set: { id_verified: verified } });
+    res.json({ success: true, message: verified ? 'ID verified!' : 'ID unverified' });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+// ── Admin - Block / Unblock User ──
+router.post('/admin/block-user', async (req, res) => {
+  const { key, userId, block } = req.body;
+  if (key !== ADMIN_KEY) return res.status(401).json({ error: 'Unauthorized' });
+  try {
+    const database = await getDB();
+    const users = database.collection('users');
+    await users.updateOne({ id: userId }, { $set: { is_blocked: block === true } });
+    res.json({ success: true, message: block ? 'User blocked' : 'User unblocked' });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+// ── Admin - Delete User ──
+router.post('/admin/delete-user', async (req, res) => {
+  const { key, userId, email } = req.body;
+  if (key !== ADMIN_KEY) return res.status(401).json({ error: 'Unauthorized' });
+  try {
+    const database = await getDB();
+    const users = database.collection('users');
+    let result;
+    if (userId) {
+      result = await users.deleteOne({ id: userId });
+    } else if (email) {
+      result = await users.deleteOne({ email: email.toLowerCase() });
+    }
+    if (result && result.deletedCount > 0) {
+      res.json({ success: true, message: 'User deleted successfully' });
+    } else {
+      res.status(404).json({ success: false, error: 'User not found' });
+    }
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
 
 module.exports = router;
 module.exports.authenticateToken = authenticateToken;
