@@ -146,7 +146,7 @@ router.post('/admin/save', async (req, res) => {
 });
 
 // POST /api/pricing/admin/update-plan
-// Update a single plan by key — used by admin portal edit form
+// Update a single plan by key — handles both old keys (starter/standard/pro) and new keys (individual/midsize/large/mega)
 router.post('/admin/update-plan', async (req, res) => {
   const { key, planKey, credits, monthly, annual, price_pkr, popular, active } = req.body;
 
@@ -157,15 +157,38 @@ router.post('/admin/update-plan', async (req, res) => {
     return res.status(400).json({ success: false, error: 'planKey required' });
   }
 
-  try {
-    const plans = await loadPlans();
-    const idx   = plans.findIndex(p => p.key === planKey);
+  // Map old keys to new keys
+  const keyMap = {
+    'starter':  'individual',
+    'standard': 'midsize',
+    'pro':      'large',
+  };
+  const normalizedKey = keyMap[planKey] || planKey;
 
-    if (idx < 0) {
-      return res.status(404).json({ success: false, error: 'Plan not found: ' + planKey });
+  try {
+    let plans = await loadPlans();
+
+    // If DB is empty or has old format, reset to defaults
+    if (!plans || plans.length === 0) {
+      plans = JSON.parse(JSON.stringify(DEFAULT_PLANS));
     }
 
-    // Only update fields that were sent
+    let idx = plans.findIndex(p => p.key === normalizedKey);
+
+    // If still not found, add it as new plan based on defaults
+    if (idx < 0) {
+      const defaultPlan = DEFAULT_PLANS.find(p => p.key === normalizedKey);
+      if (defaultPlan) {
+        plans.push(JSON.parse(JSON.stringify(defaultPlan)));
+        idx = plans.length - 1;
+      } else {
+        // Create minimal plan
+        plans.push({ key: normalizedKey, name: planKey, credits: 30, monthly: 5, annual: 50, price_pkr: 1400 });
+        idx = plans.length - 1;
+      }
+    }
+
+    // Update fields
     if (credits   !== undefined) plans[idx].credits   = Number(credits);
     if (monthly   !== undefined) plans[idx].monthly   = Number(monthly);
     if (annual    !== undefined) plans[idx].annual    = Number(annual);
@@ -174,7 +197,7 @@ router.post('/admin/update-plan', async (req, res) => {
     if (active    !== undefined) plans[idx].active    = Boolean(active);
 
     await savePlans(plans);
-    res.json({ success: true, message: `Plan "${planKey}" saved!`, plan: plans[idx], plans });
+    res.json({ success: true, message: 'Plan "' + normalizedKey + '" saved!', plan: plans[idx], plans });
   } catch (e) {
     res.status(500).json({ success: false, error: e.message });
   }
@@ -185,10 +208,19 @@ router.post('/plan/:planKey', async (req, res) => {
   const { key, credits, monthly, annual, price_pkr } = req.body;
   if (key !== ADMIN_KEY) return res.status(401).json({ error: 'Unauthorized' });
 
+  const keyMap = { 'starter': 'individual', 'standard': 'midsize', 'pro': 'large' };
+  const planKey = keyMap[req.params.planKey] || req.params.planKey;
+
   try {
-    const plans = await loadPlans();
-    const idx   = plans.findIndex(p => p.key === req.params.planKey);
-    if (idx < 0) return res.status(404).json({ success: false, error: 'Plan not found' });
+    let plans = await loadPlans();
+    if (!plans || plans.length === 0) plans = JSON.parse(JSON.stringify(DEFAULT_PLANS));
+
+    let idx = plans.findIndex(p => p.key === planKey);
+    if (idx < 0) {
+      const def = DEFAULT_PLANS.find(p => p.key === planKey);
+      if (def) { plans.push(JSON.parse(JSON.stringify(def))); idx = plans.length - 1; }
+      else return res.status(404).json({ success: false, error: 'Plan not found: ' + planKey });
+    }
 
     if (credits   !== undefined) plans[idx].credits   = Number(credits);
     if (monthly   !== undefined) plans[idx].monthly   = Number(monthly);

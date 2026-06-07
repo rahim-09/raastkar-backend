@@ -86,6 +86,12 @@ try {
   console.log('✅ coupon loaded');
 } catch(e) { console.log('❌ coupon:', e.message); }
 
+try {
+  const loanRoutes = require('./routes/loan');
+  app.use('/api/loan', loanRoutes);
+  console.log('✅ loan loaded');
+} catch(e) { console.log('❌ loan:', e.message); }
+
 // ── 404 handler ──
 app.use((req, res) => {
   res.status(404).json({ error: 'Route not found', path: req.path });
