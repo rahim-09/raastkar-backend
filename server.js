@@ -92,6 +92,58 @@ try {
   console.log('✅ loan loaded');
 } catch(e) { console.log('❌ loan:', e.message); }
 
+// ── LOAN ROUTES (inline) ──
+const { MongoClient: LoanMongo, ObjectId: LoanObjectId } = require('mongodb');
+let _loanDb = null;
+async function getLoanDB() {
+  if (_loanDb) return _loanDb;
+  const client = new LoanMongo(process.env.MONGODB_URI);
+  await client.connect();
+  _loanDb = client.db('raastkar');
+  return _loanDb;
+}
+
+app.post('/api/loan/submit', async (req, res) => {
+  try {
+    const db = await getLoanDB();
+    const doc = {
+      ...req.body,
+      status: 'pending',
+      adminNote: '',
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+    await db.collection('loan_applications').insertOne(doc);
+    res.json({ success: true, message: 'Loan application submitted!' });
+  } catch(e) { res.status(500).json({ success: false, error: e.message }); }
+});
+
+app.get('/api/loan/admin/all', async (req, res) => {
+  if (req.query.key !== (process.env.ADMIN_KEY || 'raastkar_admin_2024')) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+  try {
+    const db   = await getLoanDB();
+    const apps = await db.collection('loan_applications').find({}).sort({ created_at: -1 }).toArray();
+    res.json({ success: true, applications: apps, total: apps.length });
+  } catch(e) { res.status(500).json({ success: false, error: e.message }); }
+});
+
+app.post('/api/loan/admin/update-status', async (req, res) => {
+  const { key, id, status, note } = req.body;
+  if (key !== (process.env.ADMIN_KEY || 'raastkar_admin_2024')) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+  try {
+    const db = await getLoanDB();
+    await db.collection('loan_applications').updateOne(
+      { _id: new LoanObjectId(id) },
+      { $set: { status, adminNote: note || '', updated_at: new Date().toISOString() } }
+    );
+    res.json({ success: true, message: 'Status updated!' });
+  } catch(e) { res.status(500).json({ success: false, error: e.message }); }
+});
+
 // ── 404 handler ──
 app.use((req, res) => {
   res.status(404).json({ error: 'Route not found', path: req.path });
