@@ -373,17 +373,31 @@ router.post('/admin/delete-user', async (req, res) => {
   if (key !== ADMIN_KEY) return res.status(401).json({ error: 'Unauthorized' });
   try {
     const database = await getDB();
-    const users = database.collection('users');
+    const users    = database.collection('users');
     let result;
+
     if (userId) {
-      result = await users.deleteOne({ id: userId });
-    } else if (email) {
-      result = await users.deleteOne({ email: email.toLowerCase() });
+      // Try ObjectId first, then string id field
+      try {
+        const { ObjectId } = require('mongodb');
+        result = await users.deleteOne({ _id: new ObjectId(userId) });
+      } catch(_) {}
+      // If ObjectId failed or nothing deleted, try string fields
+      if (!result || result.deletedCount === 0) {
+        result = await users.deleteOne({ $or: [{ id: userId }, { userId: userId }, { _id: userId }] });
+      }
     }
+
+    if (!result || result.deletedCount === 0) {
+      if (email) {
+        result = await users.deleteOne({ email: email.toLowerCase() });
+      }
+    }
+
     if (result && result.deletedCount > 0) {
       res.json({ success: true, message: 'User deleted successfully' });
     } else {
-      res.status(404).json({ success: false, error: 'User not found' });
+      res.status(404).json({ success: false, error: 'User not found in database' });
     }
   } catch (e) {
     res.status(500).json({ success: false, error: e.message });

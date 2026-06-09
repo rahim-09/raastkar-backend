@@ -20,6 +20,7 @@ try { app.use('/api/carbon',        require('./routes/carbon'));         console
 try { app.use('/api/payment',       require('./routes/payment'));        console.log('✅ payment');        } catch(e) { console.log('❌ payment:', e.message); }
 try { app.use('/api/farm',          require('./routes/farm'));           console.log('✅ farm');           } catch(e) { console.log('❌ farm:', e.message); }
 try { app.use('/api/coupon',        require('./routes/coupon'));         console.log('✅ coupon');         } catch(e) { console.log('❌ coupon:', e.message); }
+try { app.use('/api/marketplace', require('./routes/marketplace')); console.log('✅ marketplace'); } catch(e) { console.log('❌ marketplace:', e.message); }
 try { app.use('/api/stripe', require('./routes/stripe')); console.log('✅ stripe'); } catch(e) { console.log('❌ stripe:', e.message); }
 try { app.use('/api/iot',  require('./routes/iot'));            console.log('✅ iot');            } catch(e) { console.log('❌ iot:', e.message); }
 try { app.use('/api/loan',          require('./routes/loan'));           console.log('✅ loan');           } catch(e) { console.log('❌ loan:', e.message); }
