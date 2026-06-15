@@ -94,5 +94,107 @@ app.use((req, res) => res.status(404).json({ error: 'Route not found', path: req
 if (process.env.NODE_ENV !== 'production') {
   app.listen(process.env.PORT || 3000, () => console.log('RaastKar Backend running on port', process.env.PORT || 3000));
 }
+// Add these fields to your existing User model (models/User.js)
+// Find your existing User schema and add:
+
+const userSchema = new mongoose.Schema({
+  // ... your existing fields ...
+  
+  // Add these new fields for social auth:
+  facebookId:   { type: String, default: null },
+  googleId:     { type: String, default: null },
+  picture:      { type: String, default: '' },
+  authProvider: { type: String, default: 'email' }, // 'email', 'google', 'facebook'
+  
+  // ... rest of your schema ...
+});
+
+// ─────────────────────────────────────────────
+// Also add to server.js — Facebook route
+// Place this BEFORE module.exports or app.listen
+// ─────────────────────────────────────────────
+
+// Install first: npm install axios
+const axios = require('axios');
+
+app.post('/api/auth/facebook', async (req, res) => {
+  try {
+    const { accessToken, userId, email, name, picture, country } = req.body;
+
+    if (!email && !userId) {
+      return res.json({ success: false, error: 'Missing credentials' });
+    }
+
+    // Verify with Facebook Graph API
+    let verifiedData = { email, name };
+    if (accessToken) {
+      try {
+        const { data } = await axios.get(
+          `https://graph.facebook.com/me?fields=id,name,email&access_token=${accessToken}`
+        );
+        verifiedData.email = data.email || email;
+        verifiedData.name  = data.name  || name;
+      } catch (e) { /* use provided data */ }
+    }
+
+    if (!verifiedData.email) {
+      return res.json({ success: false, error: 'Email permission required. Please allow email access on Facebook.' });
+    }
+
+    const emailLower = verifiedData.email.toLowerCase();
+    
+    // Find or create user
+    let user = await User.findOne({
+      $or: [{ email: emailLower }, { facebookId: userId }]
+    });
+
+    let isNewUser = false;
+
+    if (!user) {
+      isNewUser = true;
+      user = await User.create({
+        name:         verifiedData.name || 'Facebook User',
+        email:        emailLower,
+        facebookId:   userId,
+        picture:      picture || '',
+        country:      country || 'Global',
+        authProvider: 'facebook',
+        credits:      10,
+        plan:         'Free Trial',
+      });
+    } else {
+      if (!user.facebookId) {
+        user.facebookId = userId;
+        if (picture && !user.picture) user.picture = picture;
+        await user.save();
+      }
+    }
+
+    const token = require('jsonwebtoken').sign(
+      { id: user._id },
+      process.env.JWT_SECRET || 'raastkar_jwt_secret_2024',
+      { expiresIn: '30d' }
+    );
+
+    res.json({
+      success: true,
+      token,
+      isNewUser,
+      user: {
+        id:       user._id,
+        name:     user.name,
+        email:    user.email,
+        picture:  user.picture || '',
+        country:  user.country || 'Global',
+        plan:     user.plan    || 'Free Trial',
+        credits:  user.credits || 10,
+      },
+    });
+
+  } catch (err) {
+    console.error('FB auth error:', err.message);
+    res.status(500).json({ success: false, error: 'Authentication failed' });
+  }
+});
 
 module.exports = app;
