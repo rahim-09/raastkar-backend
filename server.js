@@ -1,18 +1,20 @@
 const express = require('express');
-const cors    = require('cors');
 const { MongoClient, ObjectId } = require('mongodb');
 require('dotenv').config();
 
 const app = express();
 
-// ── CORS — allow all origins (fixes web browser errors) ──
-app.use(cors({
-  origin: '*',
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
-  credentials: false,
-}));
-app.options('*', cors());
+// ── CORS — must be FIRST before everything ──
+app.use((req, res, next) => {
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS, PATCH');
+  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
+  res.header('Access-Control-Max-Age', '86400');
+  if (req.method === 'OPTIONS') {
+    return res.status(200).end();
+  }
+  next();
+});
 
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
@@ -34,6 +36,7 @@ app.get('/', (req, res) => res.json({
   version: '1.0.7',
   timestamp: new Date().toISOString(),
 }));
+
 app.get('/health', (req, res) => res.json({ status: 'ok' }));
 
 // ── LOAN ROUTES ──
@@ -102,10 +105,13 @@ try { app.use('/api/farm',          require('./routes/farm'));           console
 try { app.use('/api/coupon',        require('./routes/coupon'));         console.log('✅ coupon');         } catch (e) { console.log('❌ coupon:', e.message); }
 try { app.use('/api/marketplace',   require('./routes/marketplace'));    console.log('✅ marketplace');    } catch (e) { console.log('❌ marketplace:', e.message); }
 try {
-  app.use('/api/stripe', require('./routes/Stripe') || require('./routes/stripe'));
+  app.use('/api/stripe', require('./routes/Stripe'));
   console.log('✅ stripe');
-} catch (e) { console.log('❌ stripe:', e.message); }
-try { app.use('/api/iot',           require('./routes/iot'));            console.log('✅ iot');            } catch (e) { console.log('❌ iot:', e.message); }
+} catch (e) {
+  try { app.use('/api/stripe', require('./routes/stripe')); console.log('✅ stripe'); }
+  catch (e2) { console.log('❌ stripe:', e2.message); }
+}
+try { app.use('/api/iot', require('./routes/iot')); console.log('✅ iot'); } catch (e) { console.log('❌ iot:', e.message); }
 
 // ── MANDI ──
 try {
