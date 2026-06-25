@@ -102,6 +102,7 @@ try { app.use('/api/weather',       require('./routes/weather'));        console
 try { app.use('/api/carbon',        require('./routes/carbon'));         console.log('✅ carbon');         } catch (e) { console.log('❌ carbon:', e.message); }
 try { app.use('/api/payment',       require('./routes/payment'));        console.log('✅ payment');        } catch (e) { console.log('❌ payment:', e.message); }
 try { app.use('/api/farm',          require('./routes/farm'));           console.log('✅ farm');           } catch (e) { console.log('❌ farm:', e.message); }
+try { app.use('/api/ndvi', require('./routes/ndvi')); console.log('✅ ndvi'); } catch (e) { console.log('❌ ndvi:', e.message); }
 try { app.use('/api/coupon',        require('./routes/coupon'));         console.log('✅ coupon');         } catch (e) { console.log('❌ coupon:', e.message); }
 try { app.use('/api/marketplace',   require('./routes/marketplace'));    console.log('✅ marketplace');    } catch (e) { console.log('❌ marketplace:', e.message); }
 try {
