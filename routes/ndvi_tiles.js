@@ -78,13 +78,14 @@ router.get('/tiles', async (req, res) => {
       });
     });
 
-    const tileUrl = `https://earthengine.googleapis.com/v1/${mapId.mapid}/tiles/{z}/{x}/{y}`;
+    // Use backend proxy so browser doesn't need GEE auth
+    const proxyTileUrl = `/api/ndvi/tile-proxy/{z}/{x}/{y}?mapid=${mapId.mapid}&token=${mapId.token}`;
 
     const data = {
-      tileUrl,
-      mapId:   mapId.mapid,
-      token:   mapId.token,
-      date:    end,
+      tileUrl:  proxyTileUrl,
+      mapId:    mapId.mapid,
+      token:    mapId.token,
+      date:     end,
     };
 
     tileCache.set(cacheKey, { data, time: Date.now() });
@@ -149,8 +150,9 @@ router.get('/pakistan-tiles', async (req, res) => {
     });
 
     const data = {
-      tileUrl: `https://earthengine.googleapis.com/v1/${mapId.mapid}/tiles/{z}/{x}/{y}`,
+      tileUrl: `/api/ndvi/tile-proxy/{z}/{x}/{y}?mapid=${mapId.mapid}&token=${mapId.token}`,
       mapId:   mapId.mapid,
+      token:   mapId.token,
       date:    end,
     };
 
@@ -164,6 +166,34 @@ router.get('/pakistan-tiles', async (req, res) => {
       source:   'MODIS NASA (fallback)',
       fallback: true,
     });
+  }
+});
+
+
+// ── GET /api/ndvi/tile-proxy/:z/:x/:y ─────────────────────────────────────
+// Proxies GEE tiles so browser doesn't need auth token
+router.get('/tile-proxy/:z/:x/:y', async (req, res) => {
+  const { z, x, y } = req.params;
+  const { mapid, token } = req.query;
+  if (!mapid) return res.status(400).send('mapid required');
+
+  try {
+    const geeUrl = `https://earthengine.googleapis.com/v1/${mapid}/tiles/${z}/${x}/${y}`;
+    const headers = token ? { Authorization: `Bearer ${token}` } : {};
+
+    const response = await fetch(geeUrl, { headers });
+    if (!response.ok) {
+      return res.status(response.status).send('Tile fetch failed');
+    }
+
+    const buffer = await response.arrayBuffer();
+    res.set('Content-Type', 'image/png');
+    res.set('Cache-Control', 'public, max-age=86400');
+    res.set('Access-Control-Allow-Origin', '*');
+    res.send(Buffer.from(buffer));
+  } catch (e) {
+    console.error('Tile proxy error:', e.message);
+    res.status(500).send('Tile proxy error');
   }
 });
 
