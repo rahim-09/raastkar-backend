@@ -103,6 +103,7 @@ try { app.use('/api/carbon',        require('./routes/carbon'));         console
 try { app.use('/api/payment',       require('./routes/payment'));        console.log('✅ payment');        } catch (e) { console.log('❌ payment:', e.message); }
 try { app.use('/api/farm',          require('./routes/farm'));           console.log('✅ farm');           } catch (e) { console.log('❌ farm:', e.message); }
 try { app.use('/api/community', require('./routes/community')); console.log('✅ community'); } catch(e) { console.log('❌', e.message); }
+try { app.use('/api/community', require('./routes/community')); console.log('✅ community'); } catch(e) { console.log('❌', e.message); }
 try { app.use('/api/ndvi', require('./routes/ndvi')); console.log('✅ ndvi'); } catch (e) { console.log('❌ ndvi:', e.message); }
 try { app.use('/api/ndvi', require('./routes/ndvi_tiles')); } catch(e) {}
 try { app.use('/api/alerts', require('./routes/ndvi_alerts')); } catch(e) {}
